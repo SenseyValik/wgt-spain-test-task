@@ -3,8 +3,10 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\UserType;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -22,6 +24,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'type',
     ];
 
     /**
@@ -44,6 +47,22 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'type' => UserType::class,
         ];
+    }
+
+    /**
+     * The supplier this account acts for, if it is a supplier account.
+     *
+     * @return HasOne<Supplier, $this>
+     */
+    public function supplier(): HasOne
+    {
+        return $this->hasOne(Supplier::class);
+    }
+
+    public function isType(UserType $type): bool
+    {
+        return $this->type === $type;
     }
 }

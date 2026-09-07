@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\UserType;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -15,11 +17,17 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
+            $table->timestampTz('email_verified_at')->nullable();
             $table->string('password');
+            $table->string('type', 20)->default(UserType::Client->value);
             $table->rememberToken();
-            $table->timestamps();
+            $table->timestampsTz();
         });
+
+        DB::statement(sprintf(
+            "alter table users add constraint users_type_check check (type in ('%s'))",
+            implode("','", UserType::values())
+        ));
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {
             $table->string('email')->primary();
