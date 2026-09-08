@@ -8,6 +8,7 @@ use App\Http\Resources\ImportAcceptedResource;
 use App\Http\Resources\ImportResource;
 use App\Models\Import;
 use App\Services\ImportService;
+use Dedoc\Scramble\Attributes\PathParameter;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -25,6 +26,7 @@ class ImportController extends Controller
     /**
      * Pure read — no service, because there is no logic for one to hold.
      */
+    #[PathParameter('import', description: 'Import id, as returned by POST /api/imports.', example: 1)]
     public function show(Import $import): ImportResource
     {
         return ImportResource::make($import->load('supplier'));

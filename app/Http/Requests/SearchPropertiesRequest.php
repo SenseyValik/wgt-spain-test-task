@@ -13,11 +13,31 @@ class SearchPropertiesRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /** @example "2026-10-10" */
             'check_in' => ['required', 'date_format:Y-m-d'],
+
+            /** @example "2026-10-15" */
             'check_out' => ['required', 'date_format:Y-m-d', 'after:check_in'],
+
+            /**
+             * Only offers that sleep at least this many guests. Defaults to 1.
+             *
+             * @example 2
+             */
             'guests' => ['sometimes', 'integer', 'min:1'],
+
+            /**
+             * Optional city filter, matched exactly.
+             *
+             * @example "Barcelona"
+             */
             'city' => ['sometimes', 'string', 'max:120'],
-            // Bounded: an unbounded per_page is a trivial way to make this endpoint expensive.
+
+            /**
+             * Bounded: an unbounded per_page is a trivial way to make this endpoint expensive.
+             *
+             * @example 15
+             */
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ];
     }

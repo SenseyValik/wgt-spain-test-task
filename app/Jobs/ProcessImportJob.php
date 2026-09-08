@@ -24,7 +24,15 @@ class ProcessImportJob implements ShouldBeUnique, ShouldQueue
     /** Release the uniqueness lock after an hour even if the worker dies holding it. */
     public int $uniqueFor = 3600;
 
-    public function __construct(public Import $import) {}
+    /**
+     * @param  bool  $rowByRow  Take the row-by-row path instead of the bulk one. Only the
+     *                          `import:generate --row-by-row` dev command sets this; the API
+     *                          always dispatches the default.
+     */
+    public function __construct(
+        public Import $import,
+        public bool $rowByRow = false,
+    ) {}
 
     public function uniqueId(): string
     {
@@ -33,7 +41,9 @@ class ProcessImportJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(ImportService $service): void
     {
-        $service->createOffersFromPayload($this->import);
+        $this->rowByRow
+            ? $service->createOffersFromPayloadRowByRow($this->import)
+            : $service->createOffersFromPayload($this->import);
     }
 
     /**

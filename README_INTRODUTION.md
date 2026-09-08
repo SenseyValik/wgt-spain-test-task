@@ -1,5 +1,48 @@
-# Варто звернути увагу
+# Запуск
+```bash
+# 1. Dependencies
+composer install
 
+# 2. Environment
+cp .env.example .env
+php artisan key:generate
+
+# 3. Databases (adjust DB_USERNAME / DB_PASSWORD in .env first)
+createdb wgt_spain
+createdb wgt_spain_test
+
+# 4. Schema
+php artisan migrate --seed
+```
+
+Make sure PostgreSQL and Redis are running:
+MACOS
+для сервера я використовую Laravel Herd
+```bash
+brew services start postgresql@17
+brew services start redis
+redis-cli ping   # -> PONG
+```
+підключити базу даних в .env
+
+
+```bash
+# HTTP server
+php artisan serve                 # http://localhost:8000
+
+# Queue worker (required — imports are processed in a Job)
+php artisan queue:work redis
+
+# Migrations
+php artisan migrate:fresh --seed  # reset + seed
+```
+
+# Початок тестування
+```
+
+```
+
+# Варто звернути увагу
 ## Тести алгоритмів!!
 поганий алгорит імпорту де багато запитів і неефиктивно опрацьовує великі об'єми даних
 ```

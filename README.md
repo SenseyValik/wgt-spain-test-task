@@ -37,7 +37,7 @@ php artisan migrate
 ```
 
 Make sure PostgreSQL and Redis are running:
-
+MACOS
 ```bash
 brew services start postgresql@17
 brew services start redis
@@ -76,6 +76,30 @@ Everything is driven by `.env` (see `.env.example`, which contains no secrets):
   `Y-m-d H:i:s` strings and means UTC by them; without pinning the session timezone,
   Postgres reads them in the server's own zone and silently shifts every `timestamptz`.
 - The test suite overrides the database in `phpunit.xml` (`wgt_spain_test`)
+
+## API documentation
+
+Generated from the code by [Scramble](https://scramble.dedoc.co), so it cannot drift from
+the implementation: request parameters come from the Form Requests, response shapes from the
+API Resources. No annotations to maintain.
+
+| | |
+|---|---|
+| `GET /docs/api` | Browsable documentation, with a working "Try it" |
+| `GET /docs/api.json` | The OpenAPI 3.1 document |
+
+```bash
+php artisan scramble:export        # writes api.json, for importing elsewhere
+```
+
+Both routes are restricted to the `local` environment by Scramble's `RestrictedDocsAccess`
+middleware. The "Try it" panel sends requests to `APP_URL`, so point that at whatever you are
+actually running — `http://localhost:8000` for `artisan serve`.
+
+The one endpoint carrying hand-written annotations is `POST /api/offers/{offer}/reservations`:
+its `201`-versus-`200` distinction is decided at runtime and its `409` is thrown from the
+service, so neither is visible to static analysis. Both are declared with `#[Response]`
+attributes on the controller method. `api.json` is generated and therefore git-ignored.
 
 ## API
 

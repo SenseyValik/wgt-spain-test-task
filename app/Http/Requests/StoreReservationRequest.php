@@ -16,8 +16,18 @@ class StoreReservationRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * The caller's own id for this booking. Send the same one twice and the second
+             * request replays the first: 200 instead of 201, and no further unit taken.
+             *
+             * @example "booking-7f3a91"
+             */
             'client_reference' => ['required', 'string', 'max:191'],
+
+            /** @example "Ada Lovelace" */
             'customer_name' => ['required', 'string', 'max:255'],
+
+            /** @example "ada@example.com" */
             'customer_email' => ['required', 'email', 'max:255'],
         ];
     }
