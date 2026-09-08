@@ -97,6 +97,10 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            // Laravel writes datetimes as naive 'Y-m-d H:i:s' strings and means UTC by them.
+            // Without pinning the session timezone, Postgres interprets those strings in the
+            // server's zone and silently shifts every timestamptz by its offset.
+            'timezone' => env('DB_TIMEZONE', 'UTC'),
         ],
 
         'sqlsrv' => [

@@ -32,11 +32,16 @@ class ImportFactory extends Factory
         return $this->state(fn () => ['status' => ImportStatus::Processing]);
     }
 
-    public function completed(): static
+    /**
+     * Pass the offer count explicitly — deriving it from $attributes would depend on
+     * whether total_offers was set before or after this state was applied.
+     */
+    public function completed(int $offers = 0): static
     {
-        return $this->state(fn (array $attributes) => [
+        return $this->state(fn () => [
             'status' => ImportStatus::Completed,
-            'processed_offers' => $attributes['total_offers'] ?? 0,
+            'total_offers' => $offers,
+            'processed_offers' => $offers,
             'completed_at' => now(),
         ]);
     }
