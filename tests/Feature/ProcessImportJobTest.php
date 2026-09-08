@@ -8,8 +8,9 @@ use App\Models\Import;
 use App\Models\Offer;
 use App\Models\Property;
 use App\Models\Supplier;
-use App\Services\ImportProcessor;
+use App\Services\ImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class ProcessImportJobTest extends TestCase
@@ -43,9 +44,9 @@ class ProcessImportJobTest extends TestCase
         ], $overrides));
     }
 
-    private function process(Import $import): void
+    private function runJob(Import $import): void
     {
-        (new ProcessImportJob($import))->handle(app(ImportProcessor::class));
+        (new ProcessImportJob($import))->handle(app(ImportService::class));
     }
 
     public function test_it_creates_properties_and_offers_and_completes(): void
@@ -60,7 +61,7 @@ class ProcessImportJobTest extends TestCase
             ]),
         ]);
 
-        $this->process($import);
+        $this->runJob($import);
 
         $import->refresh();
         $this->assertSame(ImportStatus::Completed, $import->status);
@@ -84,12 +85,12 @@ class ProcessImportJobTest extends TestCase
         $supplier = Supplier::factory()->create();
 
         $first = $this->import($supplier, [$this->offerPayload()]);
-        $this->process($first);
+        $this->runJob($first);
 
         $second = $this->import($supplier, [
             $this->offerPayload(['price' => 60000, 'available_units' => 5]),
         ], ['external_import_id' => 'import-2026-09-02-001']);
-        $this->process($second);
+        $this->runJob($second);
 
         $this->assertSame(1, Offer::count(), 'The offer must be updated, not duplicated.');
         $this->assertSame(1, Property::count(), 'The property must be matched by code.');
@@ -105,14 +106,14 @@ class ProcessImportJobTest extends TestCase
         $a = Supplier::factory()->create(['code' => 'supplier-a']);
         $b = Supplier::factory()->create(['code' => 'supplier-b']);
 
-        $this->process($this->import($a, [$this->offerPayload()]));
-        $this->process($this->import($b, [$this->offerPayload()]));
+        $this->runJob($this->import($a, [$this->offerPayload()]));
+        $this->runJob($this->import($b, [$this->offerPayload()]));
 
         $this->assertSame(2, Offer::count());
         $this->assertSame(1, Property::count(), 'Both suppliers must share the property.');
     }
 
-    public function test_a_bad_offer_fails_the_import_and_preserves_progress(): void
+    public function test_a_bad_offer_fails_the_import_and_writes_nothing(): void
     {
         $supplier = Supplier::factory()->create();
         $import = $this->import($supplier, [
@@ -123,14 +124,17 @@ class ProcessImportJobTest extends TestCase
             $this->offerPayload(['external_id' => 'offer-a-10003']),
         ]);
 
-        $this->process($import);
+        $this->runJob($import);
 
         $import->refresh();
         $this->assertSame(ImportStatus::Failed, $import->status);
-        $this->assertStringContainsString('offer-a-broken', (string) $import->error);
+        $this->assertStringContainsString('offers_dates_check', (string) $import->error);
         $this->assertNotNull($import->completed_at);
-        $this->assertSame(1, $import->processed_offers, 'Progress before the failure must survive.');
-        $this->assertSame(1, Offer::count());
+
+        // The batch is one transaction, so a single bad row rolls the whole import back.
+        $this->assertSame(0, $import->processed_offers);
+        $this->assertSame(0, Offer::count());
+        $this->assertSame(0, Property::count(), 'The property upsert must roll back too.');
     }
 
     public function test_it_is_a_noop_for_an_import_that_already_finished(): void
@@ -141,7 +145,7 @@ class ProcessImportJobTest extends TestCase
             'processed_offers' => 1,
         ]);
 
-        $this->process($import);
+        $this->runJob($import);
 
         $this->assertSame(0, Offer::count(), 'A redelivered job must not reprocess.');
         $this->assertSame(1, $import->refresh()->processed_offers);
@@ -152,10 +156,10 @@ class ProcessImportJobTest extends TestCase
         $supplier = Supplier::factory()->create();
         $import = $this->import($supplier, [$this->offerPayload()]);
 
-        $this->process($import);
+        $this->runJob($import);
         // Force a retry of an import left mid-flight.
         $import->update(['status' => ImportStatus::Processing]);
-        $this->process($import);
+        $this->runJob($import);
 
         $import->refresh();
         $this->assertSame(1, $import->processed_offers);

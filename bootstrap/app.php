@@ -1,6 +1,6 @@
 <?php
 
-use App\Exceptions\ApiException;
+use App\Exceptions\WGTSpainException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,7 +24,11 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         // Single place where a business-rule failure becomes an HTTP response.
-        $exceptions->render(fn (ApiException $e) => response()->json([
-            'message' => $e->getMessage(),
-        ], $e->getCode()));
+        $exceptions->render(fn (WGTSpainException $e) => response()->json(
+            array_filter([
+                'message' => $e->getMessage(),
+                'context' => $e->context,
+            ]),
+            $e->getCode()
+        ));
     })->create();

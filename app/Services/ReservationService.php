@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Data\ReservationData;
-use App\Exceptions\ApiException;
+use App\Exceptions\WGTSpainException;
 use App\Models\Offer;
 use App\Models\Reservation;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -38,11 +38,17 @@ class ReservationService
             }
 
             if ($locked->expires_at <= now()) {
-                throw new ApiException('The offer has expired.', 409);
+                throw new WGTSpainException('The offer has expired.', 409, [
+                    'offer_id' => $locked->id,
+                    'expires_at' => $locked->expires_at->toIso8601ZuluString(),
+                ]);
             }
 
             if ($locked->available_units < 1) {
-                throw new ApiException('The offer has no available units left.', 409);
+                throw new WGTSpainException('The offer has no available units left.', 409, [
+                    'offer_id' => $locked->id,
+                    'available_units' => $locked->available_units,
+                ]);
             }
 
             try {
