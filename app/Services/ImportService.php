@@ -25,7 +25,7 @@ class ImportService
      * Offers per slice. This bounds peak memory — only one slice of bind parameters exists
      * at a time — and is capped below by what a single statement can carry.
      */
-    public const CHUNK = 500;
+    public const CHUNK = 5000;
 
     /** Postgres caps a single statement at 65535 bind parameters. */
     private const MAX_BIND_PARAMS = 65535;
@@ -78,7 +78,14 @@ class ImportService
      * Turn the stored payload into properties and offers: slice it, and for each slice make
      * one pass that fills both statements, then write the properties and the offers.
      *
-     * Everything runs in one transaction, so an import either lands in full or writes nothing.
+     * One transaction per slice, not one for the whole import. That is what makes
+     * `processed_offers` mean something while the job is still running: Postgres shows a
+     * poller nothing until COMMIT, so progress written inside a single import-wide transaction
+     * would stay invisible until the very end. The counter is bumped inside the same
+     * transaction as the rows it counts, so it can never claim more than was written.
+     *
+     * The cost is that a failure leaves the slices already committed in place. That is safe
+     * because every write is an upsert, so re-running the import repairs it.
      */
     public function createOffersFromPayload(Import $import): void
     {
@@ -99,34 +106,35 @@ class ImportService
         // re-run json_decode over the whole jsonb column. Passing the array on costs nothing:
         // PHP hands it over by refcount and only copies if a callee writes to it, which none do.
         $payload = $import->payload;
+        $total = count($payload);
+        $size = $this->sliceSize();
 
-        try {
-            DB::transaction(function () use ($import, $payload) {
-                $total = count($payload);
-                $size = $this->sliceSize();
+        // array_slice, not array_chunk: chunking would duplicate the whole payload up front.
+        // This keeps one slice alive at a time.
+        for ($offset = 0; $offset < $total; $offset += $size) {
+            $slice = array_slice($payload, $offset, $size);
+            $done = $offset + count($slice);
 
-                // array_slice, not array_chunk: chunking would duplicate the whole payload
-                // up front. This keeps one slice alive at a time.
-                for ($offset = 0; $offset < $total; $offset += $size) {
-                    $this->writeSlice($import, array_slice($payload, $offset, $size));
+            try {
+                DB::transaction(function () use ($import, $slice, $done) {
+                    $this->writeSlice($import, $slice);
 
-                    $import->update([
-                        'processed_offers' => $offset,
-                    ]);
-                }
+                    $import->update(['processed_offers' => $done]);
+                });
+            } catch (Throwable $e) {
+                // This slice rolled back; the earlier ones are committed and stay. The spec
+                // says an error means `failed`, and a half-succeeded import reporting
+                // `completed` would be a lie.
+                $this->markImportAsFailed($import, $e);
 
-                $import->update([
-                    'status' => ImportStatus::Completed,
-                    'processed_offers' => $total,
-                    'completed_at' => now(),
-                ]);
-            });
-        } catch (Throwable $e) {
-            // The transaction has already rolled back, so the import wrote nothing. The spec
-            // says an error means `failed`, and a half-succeeded import reporting `completed`
-            // would be a lie.
-            $this->markImportAsFailed($import, $e);
+                return;
+            }
         }
+
+        $import->update([
+            'status' => ImportStatus::Completed,
+            'completed_at' => now(),
+        ]);
     }
 
     /**

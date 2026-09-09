@@ -168,20 +168,34 @@ is what makes the queue retry safe. `processed_offers` is reset at the start of 
 so a retry cannot double-count, and a job redelivered for an import that already reached
 `completed` or `failed` returns immediately.
 
-Offers are written in **bulk**, in three statements no matter how large the payload is:
+Offers are written in **bulk**. The payload is sliced, and one pass over each slice fills
+both statements at once:
 
-1. one `upsert` for the distinct properties in the batch (deduplicated by `code` first —
-   Postgres refuses an `ON CONFLICT` statement that would touch the same row twice),
-2. one `select` for the resulting `[code => id]` dictionary,
-3. one `upsert` for the offers, taking `property_id` from that dictionary.
+1. one `insert ... on conflict (code)` for the distinct properties in the slice — deduplicated
+   by code first, because Postgres refuses an `ON CONFLICT` statement that would touch the same
+   row twice,
+2. one `insert ... select ... from (values ...) join properties on properties.code = v.code`
+   for the offers, which resolves `property_id` inside the statement — no id lookup, no
+   `[code => id]` map in PHP, and no second pass over the slice.
 
-All three run in **one transaction**, so an import either lands in full or writes nothing;
-`processed_offers` is therefore `0` or `total_offers`, never anything between. Rows are
-chunked at 500 per statement because Postgres caps a statement at 65535 bind parameters.
-A feature test asserts a 40-offer payload costs the same number of queries as a 2-offer one.
+So two statements per slice rather than a few per offer: a 10 000-offer payload costs ~20
+queries instead of ~40 000, which measured 1.9 s against 35 s.
 
-A single bad offer rolls the whole import back and marks it `failed` with the database error
-in `error`; a half-succeeded import reporting `completed` would be a lie.
+**One transaction per slice, not one for the whole import.** That is what makes
+`processed_offers` mean anything while the job is running — Postgres shows a poller nothing
+until `COMMIT`, so progress written inside a single import-wide transaction would stay
+invisible until the very end. The counter is bumped inside the same transaction as the rows it
+counts, so it can never claim more than was written; polling a 60 000-offer import shows it
+climbing in steps of the slice size, always exactly equal to the rows actually present.
+
+The trade-off is that a failure leaves the slices already committed in place. That is safe
+because every write is an upsert, so re-running the import repairs it — and it is the reason
+`processed_offers` is worth reporting at all. The failing slice itself rolls back whole, and
+the import is marked `failed` with the database error in `error`; a half-succeeded import
+reporting `completed` would be a lie.
+
+Slice size is `ImportService::CHUNK`, capped internally so neither statement can exceed
+Postgres' 65535 bind parameters however it is tuned.
 
 ## Protection against two concurrent bookings of the last unit
 
@@ -246,7 +260,10 @@ Route → Form Request → Controller → Service → Model
   worker and writes the offers.
   They live together because they share the same idempotency rules.
 
-The cheapest-offer search is a single SQL statement using a **lateral join**
-(`PropertySearchService`), so filtering, cheapest-per-property, ordering and pagination all
-happen in Postgres. A feature test asserts the query count does not grow with the result
-set, which is what would fail if the resolution ever moved into a PHP collection.
+The cheapest-offer search is a single SQL statement using a **lateral join**, living as the
+`withCheapestActualOffer` scope on the `Property` model — not in a service, because there is
+no logic there for one to hold: no transaction, no locking, no branching on business state.
+A query belongs on its model; a service would only be a wrapper. Filtering,
+cheapest-per-property, ordering and pagination all happen in Postgres, and a feature test
+asserts the query count does not grow with the result set, which is what would fail if the
+resolution ever moved into a PHP collection.

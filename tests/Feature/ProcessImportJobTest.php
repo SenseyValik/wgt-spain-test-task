@@ -113,7 +113,7 @@ class ProcessImportJobTest extends TestCase
         $this->assertSame(1, Property::count(), 'Both suppliers must share the property.');
     }
 
-    public function test_a_bad_offer_fails_the_import_and_writes_nothing(): void
+    public function test_a_bad_offer_rolls_back_its_own_slice(): void
     {
         $supplier = Supplier::factory()->create();
         $import = $this->import($supplier, [
@@ -131,10 +131,46 @@ class ProcessImportJobTest extends TestCase
         $this->assertStringContainsString('offers_dates_check', (string) $import->error);
         $this->assertNotNull($import->completed_at);
 
-        // The batch is one transaction, so a single bad row rolls the whole import back.
+        // These three offers all land in one slice, and a slice is one transaction, so the
+        // bad row takes the good ones with it. See the test below for what happens when the
+        // failure falls in a later slice.
         $this->assertSame(0, $import->processed_offers);
         $this->assertSame(0, Offer::count());
         $this->assertSame(0, Property::count(), 'The property upsert must roll back too.');
+    }
+
+    public function test_slices_committed_before_a_failure_survive_it(): void
+    {
+        $supplier = Supplier::factory()->create();
+        $payload = [];
+
+        // One full slice of good offers, then a bad one that opens the second slice.
+        for ($i = 1; $i <= ImportService::CHUNK; $i++) {
+            $payload[] = $this->offerPayload([
+                'external_id' => sprintf('offer-%05d', $i),
+                'property' => ['code' => sprintf('BCN-%05d', $i), 'name' => 'Apt '.$i, 'city' => 'Barcelona'],
+            ]);
+        }
+
+        $payload[] = $this->offerPayload([
+            'external_id' => 'offer-broken',
+            'property' => ['code' => 'BCN-BROKEN', 'name' => 'Broken', 'city' => 'Barcelona'],
+            // check_out before check_in trips the DB CHECK constraint.
+            'check_out' => '2026-10-01',
+        ]);
+
+        $import = $this->import($supplier, $payload);
+
+        $this->runJob($import);
+
+        $import->refresh();
+        $this->assertSame(ImportStatus::Failed, $import->status);
+
+        // One transaction per slice, so the first slice is committed and stays. This is what
+        // makes processed_offers meaningful: it reports what actually reached the database.
+        $this->assertSame(ImportService::CHUNK, $import->processed_offers);
+        $this->assertSame(ImportService::CHUNK, Offer::count());
+        $this->assertSame(0, Offer::where('external_id', 'offer-broken')->count());
     }
 
     public function test_it_is_a_noop_for_an_import_that_already_finished(): void
