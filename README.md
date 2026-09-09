@@ -1,3 +1,5 @@
+# Дивитися в README_INTRODUTION.md !!!
+
 # WGT Spain — Accommodation Offers API
 
 REST API on Laravel 12 that asynchronously imports accommodation offers from
